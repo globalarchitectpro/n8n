@@ -2,6 +2,7 @@
 import { Controls } from '@vue-flow/controls';
 import KeyboardShortcutTooltip from '@/components/KeyboardShortcutTooltip.vue';
 import { computed } from 'vue';
+import { useI18n } from '@/composables/useI18n';
 
 const props = withDefaults(
 	defineProps<{
@@ -18,6 +19,8 @@ const emit = defineEmits<{
 	'zoom-out': [];
 	'zoom-to-fit': [];
 }>();
+
+const i18n = useI18n();
 
 const isResetZoomVisible = computed(() => props.zoom !== 1);
 
@@ -40,7 +43,7 @@ function onZoomToFit() {
 <template>
 	<Controls :show-zoom="false" :show-fit-view="false">
 		<KeyboardShortcutTooltip
-			:label="$locale.baseText('nodeView.zoomToFit')"
+			:label="i18n.baseText('nodeView.zoomToFit')"
 			:shortcut="{ keys: ['1'] }"
 		>
 			<N8nIconButton
@@ -51,10 +54,7 @@ function onZoomToFit() {
 				@click="onZoomToFit"
 			/>
 		</KeyboardShortcutTooltip>
-		<KeyboardShortcutTooltip
-			:label="$locale.baseText('nodeView.zoomIn')"
-			:shortcut="{ keys: ['+'] }"
-		>
+		<KeyboardShortcutTooltip :label="i18n.baseText('nodeView.zoomIn')" :shortcut="{ keys: ['+'] }">
 			<N8nIconButton
 				type="tertiary"
 				size="large"
@@ -63,10 +63,7 @@ function onZoomToFit() {
 				@click="onZoomIn"
 			/>
 		</KeyboardShortcutTooltip>
-		<KeyboardShortcutTooltip
-			:label="$locale.baseText('nodeView.zoomOut')"
-			:shortcut="{ keys: ['-'] }"
-		>
+		<KeyboardShortcutTooltip :label="i18n.baseText('nodeView.zoomOut')" :shortcut="{ keys: ['-'] }">
 			<N8nIconButton
 				type="tertiary"
 				size="large"
@@ -77,7 +74,7 @@ function onZoomToFit() {
 		</KeyboardShortcutTooltip>
 		<KeyboardShortcutTooltip
 			v-if="isResetZoomVisible"
-			:label="$locale.baseText('nodeView.resetZoom')"
+			:label="i18n.baseText('nodeView.resetZoom')"
 			:shortcut="{ keys: ['0'] }"
 		>
 			<N8nIconButton

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Flags, type Config } from '@oclif/core';
+import { Container } from '@n8n/di';
+import { Flags } from '@oclif/core';
 import glob from 'fast-glob';
 import { createReadStream, createWriteStream, existsSync } from 'fs';
 import { mkdir } from 'fs/promises';
@@ -8,7 +9,6 @@ import { jsonParse, randomString, type IWorkflowExecutionDataProcess } from 'n8n
 import path from 'path';
 import replaceStream from 'replacestream';
 import { pipeline } from 'stream/promises';
-import { Container } from 'typedi';
 
 import { ActiveExecutions } from '@/active-executions';
 import { ActiveWorkflowManager } from '@/active-workflow-manager';
@@ -20,15 +20,12 @@ import { FeatureNotLicensedError } from '@/errors/feature-not-licensed.error';
 import { MessageEventBus } from '@/eventbus/message-event-bus/message-event-bus';
 import { EventService } from '@/events/event.service';
 import { ExecutionService } from '@/executions/execution.service';
-import { License } from '@/license';
-import { SingleMainTaskManager } from '@/runners/task-managers/single-main-task-manager';
-import { TaskManager } from '@/runners/task-managers/task-manager';
 import { PubSubHandler } from '@/scaling/pubsub/pubsub-handler';
 import { Subscriber } from '@/scaling/pubsub/subscriber.service';
 import { Server } from '@/server';
 import { OrchestrationService } from '@/services/orchestration.service';
 import { OwnershipService } from '@/services/ownership.service';
-import { PruningService } from '@/services/pruning.service';
+import { PruningService } from '@/services/pruning/pruning.service';
 import { UrlService } from '@/services/url.service';
 import { WaitTracker } from '@/wait-tracker';
 import { WorkflowRunner } from '@/workflow-runner';
@@ -70,11 +67,6 @@ export class Start extends BaseCommand {
 
 	override needsCommunityPackages = true;
 
-	constructor(argv: string[], cmdConfig: Config) {
-		super(argv, cmdConfig);
-		this.setInstanceQueueModeId();
-	}
-
 	/**
 	 * Opens the UI in browser
 	 */
@@ -102,11 +94,11 @@ export class Start extends BaseCommand {
 
 			Container.get(WaitTracker).stopTracking();
 
-			await this.externalHooks?.run('n8n.stop', []);
+			await this.externalHooks?.run('n8n.stop');
 
 			await this.activeWorkflowManager.removeAllTriggerAndPollerBasedWorkflows();
 
-			if (Container.get(OrchestrationService).isMultiMainSetupEnabled) {
+			if (this.instanceSettings.isMultiMain) {
 				await Container.get(OrchestrationService).shutdown();
 			}
 
@@ -174,8 +166,9 @@ export class Start extends BaseCommand {
 
 		this.logger.info('Initializing n8n process');
 		if (config.getEnv('executions.mode') === 'queue') {
-			this.logger.debug('Main Instance running in queue mode');
-			this.logger.debug(`Queue mode id: ${this.queueModeId}`);
+			const scopedLogger = this.logger.scoped('scaling');
+			scopedLogger.debug('Starting main instance in scaling mode');
+			scopedLogger.debug(`Host ID: ${this.instanceSettings.hostId}`);
 		}
 
 		const { flags } = await this.parse(Start);
@@ -197,15 +190,23 @@ export class Start extends BaseCommand {
 		await super.init();
 		this.activeWorkflowManager = Container.get(ActiveWorkflowManager);
 
-		await this.initLicense();
+		const isMultiMainEnabled =
+			config.getEnv('executions.mode') === 'queue' && this.globalConfig.multiMainSetup.enabled;
+
+		this.instanceSettings.setMultiMainEnabled(isMultiMainEnabled);
+
+		/**
+		 * We temporarily license multi-main to allow orchestration to set instance
+		 * role, which is needed by license init. Once the license is initialized,
+		 * the actual value will be used for the license check.
+		 */
+		if (isMultiMainEnabled) this.instanceSettings.setMultiMainLicensed(true);
 
 		await this.initOrchestration();
-		this.logger.debug('Orchestration init complete');
+		await this.initLicense();
 
-		if (!config.getEnv('license.autoRenewEnabled') && this.instanceSettings.isLeader) {
-			this.logger.warn(
-				'Automatic license renewal is disabled. The license will not renew automatically, and access to licensed features may be lost!',
-			);
+		if (isMultiMainEnabled && !this.license.isMultiMainLicensed()) {
+			throw new FeatureNotLicensedError(LICENSE_FEATURES.MULTIPLE_MAIN_INSTANCES);
 		}
 
 		Container.get(WaitTracker).init();
@@ -225,15 +226,11 @@ export class Start extends BaseCommand {
 			await this.generateStaticAssets();
 		}
 
-		if (!this.globalConfig.taskRunners.disabled) {
-			Container.set(TaskManager, new SingleMainTaskManager());
-			const { TaskRunnerServer } = await import('@/runners/task-runner-server');
-			const taskRunnerServer = Container.get(TaskRunnerServer);
-			await taskRunnerServer.start();
-
-			const { TaskRunnerProcess } = await import('@/runners/task-runner-process');
-			const runnerProcess = Container.get(TaskRunnerProcess);
-			await runnerProcess.start();
+		const { taskRunners: taskRunnerConfig } = this.globalConfig;
+		if (taskRunnerConfig.enabled) {
+			const { TaskRunnerModule } = await import('@/task-runners/task-runner-module');
+			const taskRunnerModule = Container.get(TaskRunnerModule);
+			await taskRunnerModule.start();
 		}
 	}
 
@@ -241,13 +238,6 @@ export class Start extends BaseCommand {
 		if (config.getEnv('executions.mode') === 'regular') {
 			this.instanceSettings.markAsLeader();
 			return;
-		}
-
-		if (
-			config.getEnv('multiMainSetup.enabled') &&
-			!Container.get(License).isMultipleMainInstancesLicensed()
-		) {
-			throw new FeatureNotLicensedError(LICENSE_FEATURES.MULTIPLE_MAIN_INSTANCES);
 		}
 
 		const orchestrationService = Container.get(OrchestrationService);
@@ -260,7 +250,9 @@ export class Start extends BaseCommand {
 		await subscriber.subscribe('n8n.commands');
 		await subscriber.subscribe('n8n.worker-response');
 
-		if (!orchestrationService.isMultiMainSetupEnabled) return;
+		this.logger.scoped(['scaling', 'pubsub']).debug('Pubsub setup completed');
+
+		if (this.instanceSettings.isSingleMain) return;
 
 		orchestrationService.multiMainSetup
 			.on('leader-stepdown', async () => {

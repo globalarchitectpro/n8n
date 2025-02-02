@@ -5,6 +5,7 @@ import type { EventBus } from 'n8n-design-system';
 import { useUIStore } from '@/stores/ui.store';
 import type { ModalKey } from '@/Interface';
 import { APP_MODALS_ELEMENT_ID } from '@/constants';
+import { useStyles } from '@/composables/useStyles';
 
 const props = withDefaults(
 	defineProps<{
@@ -30,6 +31,7 @@ const props = withDefaults(
 		closeOnClickModal?: boolean;
 		closeOnPressEscape?: boolean;
 		appendToBody?: boolean;
+		lockScroll?: boolean;
 	}>(),
 	{
 		title: '',
@@ -45,10 +47,13 @@ const props = withDefaults(
 		closeOnClickModal: true,
 		closeOnPressEscape: true,
 		appendToBody: false,
+		lockScroll: true,
 	},
 );
 
 const emit = defineEmits<{ enter: [] }>();
+
+const { APP_Z_INDEXES } = useStyles();
 
 const styles = computed(() => {
 	const styles: { [prop: string]: string } = {};
@@ -140,10 +145,11 @@ function getCustomClass() {
 		:close-on-press-escape="closeOnPressEscape"
 		:style="styles"
 		:append-to="appendToBody ? undefined : appModalsId"
+		:lock-scroll="lockScroll"
 		:append-to-body="appendToBody"
 		:data-test-id="`${name}-modal`"
 		:modal-class="center ? $style.center : ''"
-		:z-index="2000"
+		:z-index="APP_Z_INDEXES.MODALS"
 	>
 		<template v-if="$slots.header" #header>
 			<slot v-if="!loading" name="header" />

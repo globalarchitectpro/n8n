@@ -160,6 +160,7 @@ jobs:
           spec: '${{ inputs.spec }}'
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first
+          CYPRESS_NODE_VIEW_VERSION: 2
           CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           E2E_TESTS: true

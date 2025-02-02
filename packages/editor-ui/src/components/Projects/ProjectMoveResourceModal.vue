@@ -12,6 +12,7 @@ import { ProjectTypes } from '@/types/projects.types';
 import ProjectMoveSuccessToastMessage from '@/components/Projects/ProjectMoveSuccessToastMessage.vue';
 import { useToast } from '@/composables/useToast';
 import { getResourcePermissions } from '@/permissions';
+import { sortByProperty } from '@/utils/sortUtils';
 
 const props = defineProps<{
 	modalName: string;
@@ -34,14 +35,17 @@ const processedName = computed(
 	() => processProjectName(props.data.resource.homeProject?.name ?? '') ?? '',
 );
 const availableProjects = computed(() =>
-	projectsStore.availableProjects
-		.filter(
+	sortByProperty(
+		'name',
+		projectsStore.availableProjects.filter(
 			(p) =>
-				p.name?.toLowerCase().includes(filter.value.toLowerCase()) &&
 				p.id !== props.data.resource.homeProject?.id &&
 				(!p.scopes || getResourcePermissions(p.scopes)[props.data.resourceType].create),
-		)
-		.sort((a, b) => a.name?.localeCompare(b.name ?? '') ?? 0),
+		),
+	),
+);
+const filteredProjects = computed(() =>
+	availableProjects.value.filter((p) => p.name?.toLowerCase().includes(filter.value.toLowerCase())),
 );
 const selectedProject = computed(() =>
 	availableProjects.value.find((p) => p.id === projectId.value),
@@ -167,7 +171,7 @@ onMounted(() => {
 						<N8nIcon icon="search" />
 					</template>
 					<N8nOption
-						v-for="p in availableProjects"
+						v-for="p in filteredProjects"
 						:key="p.id"
 						:value="p.id"
 						:label="p.name"
